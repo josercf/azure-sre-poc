@@ -7,6 +7,7 @@ namespace ShotsPusher.Services;
 public interface IServiceBusTracing
 {
     Activity? StartReceiveActivity(string operationName);
+    Activity? StartReceiveActivityWithParent(string operationName, ServiceBusReceivedMessage message);
     Activity? StartProcessActivity(string operationName, ServiceBusReceivedMessage? message);
     Activity? StartWebhookActivity(string operationName, object data);
     void EnrichReceiveActivity(Activity? activity, ServiceBusReceivedMessage message);
@@ -22,12 +23,14 @@ public class ServiceBusTracing : IServiceBusTracing
 {
     private readonly IEnvironmentMapper _environmentMapper;
     private readonly ILogger<ServiceBusTracing> _logger;
+    private readonly ITraceContextPropagator _traceContextPropagator;
     private static readonly ActivitySource ActivitySource = new("ShotsPusher.ServiceBus");
 
-    public ServiceBusTracing(IEnvironmentMapper environmentMapper, ILogger<ServiceBusTracing> logger)
+    public ServiceBusTracing(IEnvironmentMapper environmentMapper, ILogger<ServiceBusTracing> logger, ITraceContextPropagator traceContextPropagator)
     {
         _environmentMapper = environmentMapper;
         _logger = logger;
+        _traceContextPropagator = traceContextPropagator;
     }
 
     public Activity? StartReceiveActivity(string operationName)
@@ -48,9 +51,49 @@ public class ServiceBusTracing : IServiceBusTracing
         return activity;
     }
 
+    public Activity? StartReceiveActivityWithParent(string operationName, ServiceBusReceivedMessage message)
+    {
+        // Extrair contexto de trace da mensagem
+        var parentContext = _traceContextPropagator.ExtractTraceContext(message);
+        
+        // Criar atividade como filho do trace original
+        var activity = _traceContextPropagator.StartActivityWithParent($"ServiceBus.{operationName}", parentContext, ActivitySource);
+        
+        if (activity != null)
+        {
+            // Enriquecer com informações do ambiente
+            _environmentMapper.EnrichActivity(activity, operationName);
+
+            // Adicionar informações específicas do Service Bus para shots
+            activity.SetTag("messaging.system", "azureservicebus");
+            activity.SetTag("messaging.operation", "receive");
+            activity.SetTag("messaging.destination.kind", "subscription");
+            activity.SetTag("messaging.destination.name", "shots-subscription");
+            activity.SetTag("shots.filter", "skill_id=4");
+            
+            // Adicionar informações da mensagem
+            EnrichReceiveActivity(activity, message);
+        }
+
+        return activity;
+    }
+
     public Activity? StartProcessActivity(string operationName, ServiceBusReceivedMessage? message)
     {
-        var activity = ActivitySource.StartActivity($"Process.{operationName}");
+        Activity? activity;
+        
+        if (message != null)
+        {
+            // Usar o mesmo contexto de trace da mensagem recebida
+            var parentContext = _traceContextPropagator.ExtractTraceContext(message);
+            activity = _traceContextPropagator.StartActivityWithParent($"Process.{operationName}", parentContext, ActivitySource);
+        }
+        else
+        {
+            // Para simulação, criar atividade normal
+            activity = ActivitySource.StartActivity($"Process.{operationName}");
+        }
+        
         if (activity == null) return null;
 
         // Enriquecer com informações do ambiente
@@ -59,12 +102,6 @@ public class ServiceBusTracing : IServiceBusTracing
         // Se temos uma mensagem real, adicionar informações dela
         if (message != null)
         {
-            // Propagar contexto de trace da mensagem recebida
-            if (message.ApplicationProperties.TryGetValue("traceparent", out var traceparent))
-            {
-                activity.SetTag("parent.trace.id", traceparent.ToString());
-            }
-
             // Informações da mensagem
             activity.SetTag("messaging.message.id", message.MessageId);
             activity.SetTag("messaging.message.conversation_id", message.CorrelationId);

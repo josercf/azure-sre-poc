@@ -62,22 +62,29 @@ public class ServiceBusTracing : IServiceBusTracing
             activity.SetTag("trace.id", traceId);
         }
 
-        // Propagar trace context para a mensagem
-        var propagationContext = new ActivityContext(
-            activity.TraceId,
-            activity.SpanId,
-            activity.ActivityTraceFlags,
-            activity.TraceStateString);
-
-        // Adicionar informações de trace context às propriedades da mensagem
-        message.ApplicationProperties["traceparent"] = activity.Id;
-        if (!string.IsNullOrEmpty(activity.TraceStateString))
+        // Propagar trace context usando W3C Trace Context format
+        if (activity != null)
         {
-            message.ApplicationProperties["tracestate"] = activity.TraceStateString;
+            // Criar trace context no formato W3C: 00-{trace-id}-{span-id}-{flags}
+            var activityTraceId = activity.TraceId.ToHexString();
+            var activitySpanId = activity.SpanId.ToHexString();
+            var flags = ((int)activity.ActivityTraceFlags).ToString("02x");
+            var traceparent = $"00-{activityTraceId}-{activitySpanId}-{flags}";
+            
+            message.ApplicationProperties["traceparent"] = traceparent;
+            
+            if (!string.IsNullOrEmpty(activity.TraceStateString))
+            {
+                message.ApplicationProperties["tracestate"] = activity.TraceStateString;
+            }
+            
+            // Adicionar trace ID para correlação manual se necessário
+            message.ApplicationProperties["trace_id"] = activityTraceId;
+            message.ApplicationProperties["parent_span_id"] = activitySpanId;
+            
+            // Adicionar timestamp de envio
+            activity.SetTag("messaging.publish.timestamp", DateTimeOffset.UtcNow.ToString("O"));
         }
-
-        // Adicionar timestamp de envio
-        activity.SetTag("messaging.publish.timestamp", DateTimeOffset.UtcNow.ToString("O"));
     }
 
     public void RecordPublishSuccess(Activity? activity, TimeSpan duration, ChampionshipData data)

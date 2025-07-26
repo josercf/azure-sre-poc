@@ -61,6 +61,7 @@ builder.Services.AddOpenTelemetry()
     {
         tracerProviderBuilder
             .AddSource("Collector.ServiceBus")
+            .SetSampler(new AlwaysOnSampler())
             .AddAspNetCoreInstrumentation(options =>
             {
                 options.RecordException = true;

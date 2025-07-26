@@ -107,16 +107,15 @@ public class ServiceBusConsumerService : IServiceBusConsumerService
 
     private async Task ProcessMessageAsync(ProcessMessageEventArgs args)
     {
-        using var receiveActivity = _tracing.StartReceiveActivity("ReceiveEvents");
+        // Usar o método que propaga o contexto de trace da mensagem
+        using var receiveActivity = _tracing.StartReceiveActivityWithParent("ReceiveEvents", args.Message);
         var receiveStopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
             var message = args.Message;
-            _logger.LogInformation("Received message: {MessageId}", message.MessageId);
-            
-            // Enrich activity with message information
-            _tracing.EnrichReceiveActivity(receiveActivity, message);
+            _logger.LogInformation("Received message: {MessageId} with TraceId: {TraceId}", 
+                message.MessageId, receiveActivity?.TraceId);
             
             receiveStopwatch.Stop();
             _tracing.RecordReceiveSuccess(receiveActivity, receiveStopwatch.Elapsed, 1);

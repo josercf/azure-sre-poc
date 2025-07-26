@@ -20,6 +20,7 @@ builder.Services.AddLogging(logging =>
 
 // Register environment mapping, tracing and metrics services
 builder.Services.AddSingleton<IEnvironmentMapper, EnvironmentMapper>();
+builder.Services.AddSingleton<ITraceContextPropagator, TraceContextPropagator>();
 builder.Services.AddSingleton<IServiceBusTracing, ServiceBusTracing>();
 builder.Services.AddSingleton<IMetricsService, MetricsService>();
 
