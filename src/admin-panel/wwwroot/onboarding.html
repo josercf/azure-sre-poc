@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Client Onboarding - Admin Panel</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .endpoint-group { border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; border-radius: 4px; }
+        .championship-list { max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; }
+        .result { margin-top: 20px; padding: 15px; border-radius: 4px; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .auth-fields { border: 1px solid #e0e0e0; padding: 15px; margin: 10px 0; border-radius: 4px; background-color: #f9f9f9; }
+    </style>
+</head>
+<body>
+    <h1>Client Onboarding</h1>
+    <form id='onboardingForm'>
+        <div class='form-group'>
+            <label>Client Name:</label>
+            <input type='text' id='name' required>
+        </div>
+        <div class='form-group'>
+            <label>Email:</label>
+            <input type='email' id='email' required>
+        </div>
+        <div class='form-group'>
+            <label>Company:</label>
+            <input type='text' id='company' required>
+        </div>
+        <div class='form-group'>
+            <label>Base URL:</label>
+            <input type='url' id='baseUrl' placeholder='https://client.com/api' required>
+        </div>
+        
+        <h3>Autenticação</h3>
+        <div class='form-group'>
+            <label>Tipo de Autenticação:</label>
+            <select id='authType' required onchange='toggleAuthFields()'>
+                <option value=''>Selecione...</option>
+                <option value='basic'>Basic Auth</option>
+                <option value='oauth2'>OAuth2</option>
+                <option value='apikey'>API Key</option>
+                <option value='bearer'>Bearer Token</option>
+            </select>
+        </div>
+        
+        <!-- Basic Auth Fields -->
+        <div id='basicAuthFields' class='auth-fields' style='display: none;'>
+            <div class='form-group'>
+                <label>Usuário:</label>
+                <input type='text' id='username'>
+            </div>
+            <div class='form-group'>
+                <label>Senha:</label>
+                <input type='password' id='password'>
+            </div>
+        </div>
+        
+        <!-- OAuth2 Fields -->
+        <div id='oauth2Fields' class='auth-fields' style='display: none;'>
+            <div class='form-group'>
+                <label>Client ID:</label>
+                <input type='text' id='clientId'>
+            </div>
+            <div class='form-group'>
+                <label>Client Secret:</label>
+                <input type='password' id='clientSecret'>
+            </div>
+            <div class='form-group'>
+                <label>Token Endpoint:</label>
+                <input type='url' id='tokenEndpoint' placeholder='https://oauth.provider.com/token'>
+            </div>
+            <div class='form-group'>
+                <label>Scope (opcional):</label>
+                <input type='text' id='scope' placeholder='read write'>
+            </div>
+        </div>
+        
+        <!-- API Key Fields -->
+        <div id='apikeyFields' class='auth-fields' style='display: none;'>
+            <div class='form-group'>
+                <label>API Key:</label>
+                <input type='password' id='apiKey'>
+            </div>
+            <div class='form-group'>
+                <label>Nome do Header:</label>
+                <input type='text' id='apiKeyHeader' value='X-API-Key'>
+            </div>
+        </div>
+        
+        <!-- Bearer Token Fields -->
+        <div id='bearerFields' class='auth-fields' style='display: none;'>
+            <div class='form-group'>
+                <label>Bearer Token:</label>
+                <input type='password' id='bearerToken'>
+            </div>
+        </div>
+        
+        <div class='form-group'>
+            <label>Endpoint de Autenticação (opcional):</label>
+            <input type='url' id='authEndpoint'>
+        </div>
+        <div class='form-group'>
+            <label>Headers Customizados (JSON, opcional):</label>
+            <textarea id='customHeaders' placeholder='{"Custom-Header": "value"}'></textarea>
+        </div>
+        
+        <h3>Endpoints dos Serviços</h3>
+        <div id='endpoints'>
+            <div class='endpoint-group'>
+                <label>Service Type:</label>
+                <select class='serviceType' required>
+                    <option value=''>Select...</option>
+                    <option value='coleta'>Coleta</option>
+                    <option value='finalizacao'>Finalização</option>
+                    <option value='periodo-partida'>Período Partida</option>
+                    <option value='escalacao'>Escalação</option>
+                    <option value='finalizacao-xg'>Finalização XG</option>
+                </select>
+                <label>Endpoint:</label>
+                <input type='text' class='endpoint' placeholder='/webhook/coleta' required>
+            </div>
+        </div>
+        <button type='button' onclick='addEndpoint()'>Add Another Endpoint</button>
+        
+        <h3>Campeonatos</h3>
+        <div class='championship-list' id='championshipsList'>
+            Loading championships...
+        </div>
+        
+        <button type='submit'>Cadastrar Cliente</button>
+    </form>
+    
+    <div id='result'></div>
+    
+    <script>
+        let championships = [];
+        
+        // Toggle authentication fields based on type
+        function toggleAuthFields() {
+            const authType = document.getElementById('authType').value;
+            const authFields = document.querySelectorAll('.auth-fields');
+            
+            // Hide all auth fields
+            authFields.forEach(field => field.style.display = 'none');
+            
+            // Show relevant fields
+            if (authType === 'basic') {
+                document.getElementById('basicAuthFields').style.display = 'block';
+            } else if (authType === 'oauth2') {
+                document.getElementById('oauth2Fields').style.display = 'block';
+            } else if (authType === 'apikey') {
+                document.getElementById('apikeyFields').style.display = 'block';
+            } else if (authType === 'bearer') {
+                document.getElementById('bearerFields').style.display = 'block';
+            }
+        }
+        
+        // Load championships
+        fetch('/api/clientonboarding/championships')
+            .then(r => r.json())
+            .then(data => {
+                championships = data;
+                const list = document.getElementById('championshipsList');
+                list.innerHTML = data.map(c => 
+                    `<label><input type='checkbox' value='${c.id}'> ${c.name}</label><br>`
+                ).join('');
+            })
+            .catch(e => {
+                document.getElementById('championshipsList').innerHTML = 'Error loading championships';
+            });
+        
+        function addEndpoint() {
+            const endpointsDiv = document.getElementById('endpoints');
+            const newEndpoint = document.createElement('div');
+            newEndpoint.className = 'endpoint-group';
+            newEndpoint.innerHTML = `
+                <label>Service Type:</label>
+                <select class='serviceType' required>
+                    <option value=''>Select...</option>
+                    <option value='coleta'>Coleta</option>
+                    <option value='finalizacao'>Finalização</option>
+                    <option value='periodo-partida'>Período Partida</option>
+                    <option value='escalacao'>Escalação</option>
+                    <option value='finalizacao-xg'>Finalização XG</option>
+                </select>
+                <label>Endpoint:</label>
+                <input type='text' class='endpoint' required>
+                <button type='button' onclick='this.parentElement.remove()'>Remove</button>
+            `;
+            endpointsDiv.appendChild(newEndpoint);
+        }
+        
+        document.getElementById('onboardingForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = 'Processing...';
+            
+            try {
+                const endpoints = Array.from(document.querySelectorAll('.endpoint-group')).map(group => ({
+                    serviceType: group.querySelector('.serviceType').value,
+                    endpoint: group.querySelector('.endpoint').value
+                }));
+                
+                const selectedChampionships = Array.from(document.querySelectorAll('#championshipsList input:checked')).map(cb => parseInt(cb.value));
+                
+                // Build authentication object based on type
+                const authType = document.getElementById('authType').value;
+                const authentication = {
+                    type: authType,
+                    authEndpoint: document.getElementById('authEndpoint').value || null,
+                    customHeaders: document.getElementById('customHeaders').value || null
+                };
+                
+                // Add type-specific fields
+                if (authType === 'basic') {
+                    authentication.username = document.getElementById('username').value;
+                    authentication.password = document.getElementById('password').value;
+                } else if (authType === 'oauth2') {
+                    authentication.clientId = document.getElementById('clientId').value;
+                    authentication.clientSecret = document.getElementById('clientSecret').value;
+                    authentication.tokenEndpoint = document.getElementById('tokenEndpoint').value;
+                    authentication.scope = document.getElementById('scope').value;
+                } else if (authType === 'apikey') {
+                    authentication.apiKey = document.getElementById('apiKey').value;
+                    authentication.apiKeyHeader = document.getElementById('apiKeyHeader').value;
+                } else if (authType === 'bearer') {
+                    authentication.bearerToken = document.getElementById('bearerToken').value;
+                }
+                
+                const payload = {
+                    name: document.getElementById('name').value,
+                    email: document.getElementById('email').value,
+                    company: document.getElementById('company').value,
+                    baseUrl: document.getElementById('baseUrl').value,
+                    authentication: authentication,
+                    endpoints: endpoints,
+                    championshipIds: selectedChampionships
+                };
+                
+                const response = await fetch('/api/clientonboarding/onboard', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <h3>Success!</h3>
+                        <p>Client ID: ${result.clientId}</p>
+                        <p>Key Vault Key: ${result.keyVaultCredentialsKey}</p>
+                        <p>Created Subscriptions: ${result.createdSubscriptions.join(', ')}</p>
+                    `;
+                    document.getElementById('onboardingForm').reset();
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<h3>Error</h3><p>${result.message || result.error}</p>`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<h3>Error</h3><p>${error.message}</p>`;
+            }
+        });
+    </script>
+</body>
+</html>

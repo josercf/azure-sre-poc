@@ -1,0 +1,189 @@
+services:
+  # Collector service for data collection and Service Bus publishing
+  collector:
+    build:
+      context: ./src/collector
+      dockerfile: Dockerfile
+    container_name: collector
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_HTTP_PORTS=8080
+      - AzureServiceBus__ConnectionString=${AzureServiceBus__ConnectionString}
+      - AzureServiceBus__TopicName=${AzureServiceBus__TopicName}
+      - AZURE_KEY_VAULT__VAULT_URL=${AZURE_KEY_VAULT_URL}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OpenTelemetry__ServiceName=collector
+      - OpenTelemetry__ServiceVersion=1.0.0
+    ports:
+      - "5002:8080"
+    networks:
+      - azure-sre-poc
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - jaeger
+
+  # Admin Panel service for client onboarding and management
+  admin-panel:
+    build:
+      context: ./src/admin-panel
+      dockerfile: Dockerfile
+    container_name: admin-panel
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_HTTP_PORTS=8080
+      - AzureServiceBus__ConnectionString=${AzureServiceBus__ConnectionString}
+      - AZURE_KEY_VAULT__VAULT_URL=${AZURE_KEY_VAULT_URL}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OpenTelemetry__ServiceName=admin-panel
+      - OpenTelemetry__ServiceVersion=1.0.0
+    ports:
+      - "5001:8080"
+    networks:
+      - azure-sre-poc
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Controller Manager service for orchestrating other services
+  controller-manager:
+    build:
+      context: ./src/controller-manager
+      dockerfile: Dockerfile
+    container_name: controller-manager
+    environment:
+      - DOTNET_ENVIRONMENT=Development
+      - AzureServiceBus__ConnectionString=${AzureServiceBus__ConnectionString}      
+      - AZURE_KEY_VAULT__VAULT_URL=${AZURE_KEY_VAULT_URL}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OpenTelemetry__ServiceName=controller-manager
+      - OpenTelemetry__ServiceVersion=1.0.0
+    networks:
+      - azure-sre-poc
+    restart: unless-stopped
+
+  events-pusher:
+    build:
+      context: ./src/pushers/events
+      dockerfile: Dockerfile
+    container_name: events-pusher
+    environment:
+      - DOTNET_ENVIRONMENT=Development
+      - AzureServiceBus__ConnectionString=${AzureServiceBus__ConnectionString}
+      - AzureServiceBus__TopicName=${AzureServiceBus__TopicName}
+      - AzureServiceBus__EventsSubscriptionName=${AzureServiceBus__EventsSubscriptionName}
+      - AZURE_KEY_VAULT__VAULT_URL=${AZURE_KEY_VAULT_URL}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://jaeger:4317
+      - OpenTelemetry__ServiceName=events-pusher
+      - OpenTelemetry__ServiceVersion=1.0.0
+    networks:
+      - azure-sre-poc
+    restart: unless-stopped
+    depends_on:
+      - jaeger
+
+  shots-pusher:
+    build:
+      context: ./src/pushers/shots
+      dockerfile: Dockerfile
+    container_name: shots-pusher
+    environment:
+      - DOTNET_ENVIRONMENT=Development
+      - AzureServiceBus__ConnectionString=${AzureServiceBus__ConnectionString}
+      - AzureServiceBus__TopicName=${AzureServiceBus__TopicName}
+      - AzureServiceBus__ShotsSubscriptionName=${AzureServiceBus__ShotsSubscriptionName}
+      - AZURE_KEY_VAULT__VAULT_URL=${AZURE_KEY_VAULT_URL}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://jaeger:4317
+      - OpenTelemetry__ServiceName=shots-pusher
+      - OpenTelemetry__ServiceVersion=1.0.0
+    networks:
+      - azure-sre-poc
+    restart: unless-stopped
+    depends_on:
+      - jaeger
+
+
+
+  # Observability Stack
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - azure-sre-poc
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - azure-sre-poc
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - azure-sre-poc
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/local-config.yaml
+    networks:
+      - azure-sre-poc
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - ./observability/promtail-config.yml:/etc/promtail/config.yml
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - azure-sre-poc
+    restart: unless-stopped
+
+networks:
+  azure-sre-poc:
+    driver: bridge 
